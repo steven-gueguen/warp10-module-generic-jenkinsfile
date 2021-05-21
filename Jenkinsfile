@@ -50,7 +50,7 @@ pipeline {
                 message "Should we deploy libs?"
             }
             steps {
-                sh '$GRADLE_CMD publishJarPublicationToNexusRepository publishUberJarPublicationToNexusRepository'
+                sh '$GRADLE_CMD publishJarPublicationToNexusRepository' + (getParam('publishUberJar') ? ' publishUberJarPublicationToNexusRepository' : '')
             }
         }
 
@@ -67,7 +67,7 @@ pipeline {
                         message 'Should we deploy to Maven Central?'
                     }
                     steps {
-                        sh '$GRADLE_CMD publishJarPublicationToMavenRepository publishUberJarPublicationToMavenRepository'
+                        sh '$GRADLE_CMD publishJarPublicationToMavenRepository' + (getParam('publishUberJar') ? ' publishUberJarPublicationToMavenRepository' : '')
                         sh '$GRADLE_CMD closeRepository'
                         sh '$GRADLE_CMD releaseRepository'
                         this.notifyBuild('PUBLISHED', version)
