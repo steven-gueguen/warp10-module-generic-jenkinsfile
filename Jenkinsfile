@@ -19,13 +19,13 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
+                script {
+                    version = ""
+                }
                 this.notifyBuild('STARTED')
                 git poll: false, url: "${params.repoURL}"
-                sh 'git checkout master'
-                sh 'git fetch --tags'
-                sh 'git pull origin master'
                 script {
-                    version = getVersion()
+                    version = getGitVersion()
                 }
             }
         }
@@ -126,7 +126,7 @@ void notifySlack(String color, String message, String buildStatus) {
     sh "curl -X POST -H 'Content-type: application/json' --data '${payload}' ${slackURL}" as String
 }
 
-String getVersion() {
+String getGitVersion() {
     return sh(returnStdout: true, script: 'git describe --abbrev=0 --tags').trim()
 }
 
