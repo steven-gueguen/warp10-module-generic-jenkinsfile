@@ -9,40 +9,47 @@ pipeline {
     }
 
     environment {
-        GRADLE_CMD = "$GRADLE_CMD -Psigning.gnupg.keyName=${getParam('gpgKeyName')} -PossrhUsername=${getParam('ossrhUsername')} -PossrhPassword=${getParam('ossrhPassword')} -PnexusHost=${getParam('nexusHost')}  -PnexusUsername=${getParam('nexusUsername')} -PnexusPassword=${getParam('nexusPassword')}"
-        version = "${getVersion()}"
+        GPG_KEY_NAME = "${params.gpgKeyName}"
+        NEXUS_HOST = "${params.nexusHost}"
+        NEXUS_CREDS = credentials('nexus')
+        OSSRH_CREDS = credentials('ossrh')
+        GRADLE_CMD = './gradlew -Psigning.gnupg.keyName=$GPG_KEY_NAME -PossrhUsername=$OSSRH_CREDS_USR -PossrhPassword=$OSSRH_CREDS_PSW -PnexusHost=$NEXUS_HOST  -PnexusUsername=$NEXUS_CREDS_USR -PnexusPassword=$NEXUS_CREDS_PSW'
+        version = ""
     }
     stages {
         stage('Checkout') {
             steps {
-                this.notifyBuild('STARTED', version)
-                git poll: false, url: "${getParam('repoURL')}"
+                this.notifyBuild('STARTED')
+                git poll: false, url: "${params.repoURL}"
                 sh 'git checkout master'
                 sh 'git fetch --tags'
                 sh 'git pull origin master'
+                script {
+                    version = getVersion()
+                }
             }
         }
 
         stage('Build') {
             steps {
-                sh '$GRADLE_CMD clean build'
+                sh "$GRADLE_CMD clean build"
             }
         }
 
         stage('Test') {
             steps {
-                sh '$GRADLE_CMD test'
+                sh "$GRADLE_CMD test"
             }
         }
 
         stage('Package') {
             steps {
-                sh '$GRADLE_CMD jar shadowJar sourcesJar javadocJar'
+                sh "$GRADLE_CMD jar shadowJar sourcesJar javadocJar"
                 archiveArtifacts "build/libs/*.jar"
             }
         }
 
-        stage('Deploy libs to SenX\' Nexus') {
+        stage('Deploy to SenX\' Nexus') {
             options {
                 timeout(time: 2, unit: 'HOURS')
             }
@@ -50,49 +57,46 @@ pipeline {
                 message "Should we deploy libs?"
             }
             steps {
-                sh '$GRADLE_CMD publishJarPublicationToNexusRepository' + (getParam('publishUberJar') ? ' publishUberJarPublicationToNexusRepository' : '')
+                sh "$GRADLE_CMD publishJarPublicationToNexusRepository" + (params.publishUberJar ? ' publishUberJarPublicationToNexusRepository' : '')
             }
         }
 
-        stage('Maven Publish') {
+        stage('Deploy to Maven Central') {
             when {
                 expression { return isItATagCommit() }
+                beforeInput true
             }
-            parallel {
-                stage('Deploy to Maven Central') {
-                    options {
-                        timeout(time: 2, unit: 'HOURS')
-                    }
-                    input {
-                        message 'Should we deploy to Maven Central?'
-                    }
-                    steps {
-                        sh '$GRADLE_CMD publishJarPublicationToMavenRepository' + (getParam('publishUberJar') ? ' publishUberJarPublicationToMavenRepository' : '')
-                        sh '$GRADLE_CMD closeRepository'
-                        sh '$GRADLE_CMD releaseRepository'
-                        this.notifyBuild('PUBLISHED', version)
-                    }
-                }
+            options {
+                timeout(time: 2, unit: 'HOURS')
+            }
+            input {
+                message 'Should we deploy to Maven Central?'
+            }
+            steps {
+                sh "$GRADLE_CMD publishJarPublicationToMavenRepository" + (params.publishUberJar ? ' publishUberJarPublicationToMavenRepository' : '')
+                sh "$GRADLE_CMD closeRepository"
+                sh "$GRADLE_CMD releaseRepository"
+                this.notifyBuild('PUBLISHED')
             }
         }
     }
     post {
         success {
-            this.notifyBuild('SUCCESSFUL', version)
+            this.notifyBuild('SUCCESSFUL')
         }
         failure {
-            this.notifyBuild('FAILURE', version)
+            this.notifyBuild('FAILURE')
         }
         aborted {
-            this.notifyBuild('ABORTED', version)
+            this.notifyBuild('ABORTED')
         }
         unstable {
-            this.notifyBuild('UNSTABLE', version)
+            this.notifyBuild('UNSTABLE')
         }
     }
 }
 
-void notifyBuild(String buildStatus, String version) {
+void notifyBuild(String buildStatus) {
     // build status of null means successful
     buildStatus = buildStatus ?: 'SUCCESSFUL'
     String subject = "${buildStatus}: Job ${env.JOB_NAME} [${env.BUILD_DISPLAY_NAME}] | ${version}" as String
@@ -117,13 +121,9 @@ void notifyBuild(String buildStatus, String version) {
 }
 
 void notifySlack(String color, String message, String buildStatus) {
-    String slackURL = getParam('slackUrl')
+    String slackURL = "${params.slackUrl}"
     String payload = "{\"username\": \"${env.JOB_NAME}\",\"attachments\":[{\"title\": \"${env.JOB_NAME} ${buildStatus}\",\"color\": \"${color}\",\"text\": \"${message}\"}]}" as String
     sh "curl -X POST -H 'Content-type: application/json' --data '${payload}' ${slackURL}" as String
-}
-
-String getParam(String key) {
-    return params.get(key)
 }
 
 String getVersion() {
