@@ -14,7 +14,6 @@ pipeline {
         NEXUS_CREDS = credentials('nexus')
         OSSRH_CREDS = credentials('ossrh')
         GRADLE_CMD = './gradlew -Psigning.gnupg.keyName=$GPG_KEY_NAME -PossrhUsername=$OSSRH_CREDS_USR -PossrhPassword=$OSSRH_CREDS_PSW -PnexusHost=$NEXUS_HOST  -PnexusUsername=$NEXUS_CREDS_USR -PnexusPassword=$NEXUS_CREDS_PSW'
-        version = ""
     }
     stages {
         stage('Checkout') {
@@ -24,6 +23,9 @@ pipeline {
                 }
                 this.notifyBuild('STARTED')
                 git poll: false, url: "${params.repoURL}"
+                sh 'git checkout master'
+                sh 'git fetch --tags'
+                sh 'git pull origin master'
                 script {
                     version = getGitVersion()
                 }
