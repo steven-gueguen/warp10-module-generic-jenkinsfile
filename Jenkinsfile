@@ -1,8 +1,6 @@
-#!/usr/bin/env groovy
-import hudson.model.*
-
 pipeline {
     agent any
+
     options {
         disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '3'))
@@ -13,28 +11,26 @@ pipeline {
         NEXUS_HOST = "${params.nexusHost}"
         NEXUS_CREDS = credentials('nexus')
         OSSRH_CREDS = credentials('ossrh')
-        GRADLE_CMD = './gradlew -Psigning.gnupg.keyName=$GPG_KEY_NAME -PossrhUsername=$OSSRH_CREDS_USR -PossrhPassword=$OSSRH_CREDS_PSW -PnexusHost=$NEXUS_HOST  -PnexusUsername=$NEXUS_CREDS_USR -PnexusPassword=$NEXUS_CREDS_PSW'
+        GRADLE_CMD = './gradlew \
+            -Psigning.gnupg.keyName=$GPG_KEY_NAME \
+            -PossrhUsername=$OSSRH_CREDS_USR \
+            -PossrhPassword=$OSSRH_CREDS_PSW \
+            -PnexusHost=$NEXUS_HOST \
+            -PnexusUsername=$NEXUS_CREDS_USR \
+            -PnexusPassword=$NEXUS_CREDS_PSW'
     }
+
     stages {
         stage('Checkout') {
             steps {
-                script {
-                    version = ""
-                }
                 this.notifyBuild('STARTED')
-                git poll: false, url: "${params.repoURL}"
-                sh 'git checkout master'
-                sh 'git fetch --tags'
-                sh 'git pull origin master'
-                script {
-                    version = getGitVersion()
-                }
+                git "${params.repoURL}"
             }
         }
 
         stage('Build') {
             steps {
-                sh "$GRADLE_CMD clean build"
+                sh "$GRADLE_CMD clean build -x test"
             }
         }
 
@@ -44,41 +40,21 @@ pipeline {
             }
         }
 
-        stage('Package') {
+        stage('Publish') {
+            options {
+                timeout(time: 4, unit: 'DAYS')
+            }
+            input {
+                message "Should we deploy module to 'Maven Central' and 'Local Nexus'?"
+            }
             steps {
-                sh "$GRADLE_CMD jar shadowJar sourcesJar javadocJar"
-                archiveArtifacts "build/libs/*.jar"
+                sh "$GRADLE_CMD publish closeAndReleaseStagingRepository"
             }
         }
 
-        stage('Deploy to SenX\' Nexus') {
-            options {
-                timeout(time: 2, unit: 'HOURS')
-            }
-            input {
-                message "Should we deploy libs?"
-            }
+        stage('Update Warpfleet') {
             steps {
-                sh "$GRADLE_CMD publishJarPublicationToNexusRepository" + (params.publishUberJar ? ' publishUberJarPublicationToNexusRepository' : '')
-            }
-        }
-
-        stage('Deploy to Maven Central') {
-            when {
-                expression { return isItATagCommit() }
-                beforeInput true
-            }
-            options {
-                timeout(time: 2, unit: 'HOURS')
-            }
-            input {
-                message 'Should we deploy to Maven Central?'
-            }
-            steps {
-                sh "$GRADLE_CMD publishJarPublicationToMavenRepository" + (params.publishUberJar ? ' publishUberJarPublicationToMavenRepository' : '')
-                sh "$GRADLE_CMD closeRepository"
-                sh "$GRADLE_CMD releaseRepository"
-                this.notifyBuild('PUBLISHED')
+                sh "echo 'wf publish'"
             }
         }
     }
@@ -123,17 +99,7 @@ void notifyBuild(String buildStatus) {
 }
 
 void notifySlack(String color, String message, String buildStatus) {
-    String slackURL = "${params.slackUrl}"
-    String payload = "{\"username\": \"${env.JOB_NAME}\",\"attachments\":[{\"title\": \"${env.JOB_NAME} ${buildStatus}\",\"color\": \"${color}\",\"text\": \"${message}\"}]}" as String
-    sh "curl -X POST -H 'Content-type: application/json' --data '${payload}' ${slackURL}" as String
-}
-
-String getGitVersion() {
-    return sh(returnStdout: true, script: 'git describe --abbrev=0 --tags').trim()
-}
-
-boolean isItATagCommit() {
-    String lastCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-    String tag = sh(returnStdout: true, script: "git show-ref --tags -d | grep ^${lastCommit} | sed -e 's,.* refs/tags/,,' -e 's/\\^{}//'").trim()
-    return tag != ''
+    // String slackURL = "${params.slackUrl}"
+    // String payload = "{\"username\": \"${env.JOB_NAME}\",\"attachments\":[{\"title\": \"${env.JOB_NAME} ${buildStatus}\",\"color\": \"${color}\",\"text\": \"${message}\"}]}" as String
+    // sh "curl -X POST -H 'Content-type: application/json' --data '${payload}' ${slackURL}" as String
 }
