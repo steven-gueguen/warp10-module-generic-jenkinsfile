@@ -77,6 +77,7 @@ pipeline {
             }
             steps {
                 sh "$GRADLE_CMD publish closeAndReleaseStagingRepository"
+                echo "wf publish"
             }
         }
     }
