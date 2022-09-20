@@ -1,10 +1,16 @@
-import jenkins.model.*
 pipeline {
     agent any
 
     options {
         disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '3'))
+        timestamps()
+    }
+
+    parameters {
+        string(name: 'nexusHost', defaultValue: 'http://localhost:8081', description: 'Local Nexus')
+        string(name: 'gpgKeyName', defaultValue: 'BD49DA0A', description: 'Gpg key to sign the artifacts')
+        string(name: 'repoURL', defaultValue: 'https://github.com/steven-gueguen/warp10-ext-pcap.git', description: 'Repository URL of the module to be build')
     }
 
     environment {
@@ -24,8 +30,25 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
+                script {
+                    version = ""
+                }
                 this.notifyBuild('STARTED')
                 git "${params.repoURL}"
+                script {
+                    version = getGitVersion()
+                }
+            }
+        }
+
+       stage('Debug') {
+            steps{
+                sh "set"
+                echo "============================================================"
+                sh "env"
+                echo "============================================================"
+                echo "Building $env.BRANCH_NAME"
+                echo "Building $env.TAG_NAME"
             }
         }
 
@@ -41,21 +64,19 @@ pipeline {
             }
         }
 
-        stage('Publish') {
+        stage('Publish to:\nLocal Nexus\nMaven Central\nWarpFleet') {
+            when {
+                beforeInput true
+                buildingTag()
+            }
             options {
                 timeout(time: 4, unit: 'DAYS')
             }
             input {
-                message "Should we deploy module to 'Maven Central' and 'Local Nexus'?"
+                message "Should we deploy module to\n'Maven Central',\n'Local Nexus',\n and WarpFleet?"
             }
             steps {
                 sh "$GRADLE_CMD publish closeAndReleaseStagingRepository"
-            }
-        }
-
-        stage('Update Warpfleet') {
-            steps {
-                sh "echo 'wf publish'"
             }
         }
     }
@@ -100,7 +121,12 @@ void notifyBuild(String buildStatus) {
 }
 
 void notifySlack(String color, String message, String buildStatus) {
-    // String slackURL = "${params.slackUrl}"
-    // String payload = "{\"username\": \"${env.JOB_NAME}\",\"attachments\":[{\"title\": \"${env.JOB_NAME} ${buildStatus}\",\"color\": \"${color}\",\"text\": \"${message}\"}]}" as String
+    String slackURL = "${params.slackUrl}"
+    String payload = "{\"username\": \"${env.JOB_NAME}\",\"attachments\":[{\"title\": \"${env.JOB_NAME} ${buildStatus}\",\"color\": \"${color}\",\"text\": \"${message}\"}]}" as String
     // sh "curl -X POST -H 'Content-type: application/json' --data '${payload}' ${slackURL}" as String
+    echo "${payload}"
+}
+
+String getGitVersion() {
+    return sh(returnStdout: true, script: 'git describe --abbrev=0 --tags').trim()
 }
